@@ -1,7 +1,8 @@
 # Permutation test for DIABLO model with a certain configuration
 ## This function is to be used in conjunction with the block.splsda function from the mixOmics package
 ## Empirical p-values are computed for each variable in each omic and for each component in the DIABLO model. The empirical p-values are calculated based on the null distribution of the loadings obtained by permuted Y, and adjusted for multiple testing using the false discovery rate (FDR) method.
-## n_per should larger than max(ncol(X[[i]]))/target.fdr to ensure the stability of the adjusted p-values, and please be aware of your RAM usage -- it can cause crashes!; if not using large n_per, the adjusted p-values may be unreliable, the raw p-values can be used instead.
+## n_per should larger than max(ncol(X[[i]]))/target.fdr to ensure the stability of the adjusted p-values, and please be aware of your RAM usage -- it can cause crashes! e.g. when my diablo object is 700 KB, and n_per = 100000, it will take 70 GB of RAM, which is not feasible.
+## if not using large n_per, the adjusted p-values may be unreliable, the raw p-values can be used instead.
 ## Parallel computing is used.
 
 diablo.perm.test <- function(X, Y, ncomp, keepX, design, ..., n_per = 1000, seed = 1, target.fdr = 0.05) {
@@ -10,10 +11,10 @@ diablo.perm.test <- function(X, Y, ncomp, keepX, design, ..., n_per = 1000, seed
   diablo.orig <- block.splsda(X, Y, ncomp = ncomp, keepX = keepX, design = design, ...)
   
   # Run permutation tests in parallel
-  perm.diablo <- foreach(i = 1:n_per, .packages = c("mixOmics"), .options.RNG = seed) %dorng% {
+  perm.diablo.loadings <- foreach::foreach(i = 1:n_per, .packages = c("mixOmics"), .options.RNG = seed) %dorng% {
     perm.y <- sample(Y)
-    diablo <- block.splsda(X, perm.y, ncomp = ncomp, keepX = keepX, design = design, ...)
-    return(diablo)
+    diablo.loadings <- block.splsda(X, perm.y, ncomp = ncomp, keepX = keepX, design = design)$loadings
+    return(diablo.loadings)
   }
   
   # Extract loading matrices for each omic
@@ -26,7 +27,7 @@ diablo.perm.test <- function(X, Y, ncomp, keepX, design, ..., n_per = 1000, seed
                                 dimnames = list(NULL, colnames(X[[i]]), paste0("comp", 1:ncomp)))
     
     for (j in 1:n_per) {
-      perm.loadings[[i]][j, , ] <- perm.diablo[[j]]$loadings[[i]][, 1:ncomp]
+      perm.loadings[[i]][j, , ] <- perm.diablo.loadings[[j]][[i]][, 1:ncomp]
     }
   }
   
