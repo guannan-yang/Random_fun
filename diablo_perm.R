@@ -1,7 +1,7 @@
 # Permutation test for DIABLO model with a certain configuration
 ## This function is to be used in conjunction with the block.splsda function from the mixOmics package
 ## Empirical p-values are computed for each variable in each omic and for each component in the DIABLO model. The empirical p-values are calculated based on the null distribution of the loadings obtained by permuted Y, and adjusted for multiple testing using the false discovery rate (FDR) method.
-## n_per should larger than 1/(target.fdr/max(ncol(X[[i]]))) to ensure the stability of the adjusted p-values; if not, the adjusted p-values may be unreliable, the raw p-values can be used instead.
+## n_per should larger than max(ncol(X[[i]]))/target.fdr to ensure the stability of the adjusted p-values, and please be aware of your RAM usage -- it can cause crashes!; if not using large n_per, the adjusted p-values may be unreliable, the raw p-values can be used instead.
 ## Parallel computing is used.
 
 diablo.perm.test <- function(X, Y, ncomp, keepX, design, ..., n_per = 1000, seed = 1, target.fdr = 0.05) {
