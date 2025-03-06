@@ -1,19 +1,43 @@
 # Permutation test for DIABLO model with a certain configuration
 ## This function is to be used in conjunction with the block.splsda function from the mixOmics package
 ## Empirical p-values are computed for each variable in each omic and for each component in the DIABLO model. The empirical p-values are calculated based on the null distribution of the loadings obtained by permuted Y, and adjusted for multiple testing using the false discovery rate (FDR) method.
-## n_per should larger than max(ncol(X[[i]]))/target.fdr to ensure the stability of the adjusted p-values, and please be aware of your RAM usage -- it can cause crashes! e.g. when my diablo object is 700 KB, and n_per = 100000, it will take 70 GB of RAM, which is not feasible.
-## if not using large n_per, the adjusted p-values may be unreliable, the raw p-values can be used instead.
+## n_perm should be much larger than max(keepX[[i]])/target.q to ensure the stability of the adjusted p-values when using Bonferroni correction to control FWER, 
+## Please be aware of your RAM usage with large n_perm -- it can cause crashes! e.g. when my diablo loading object is 700 KB, and n_perm = 10000, it will take 7 GB of RAM, which is not feasible.
+## if not using large n_perm, the adjusted p-values may be unreliable, the raw p-values can be used instead.
 ## Parallel computing is used.
 
-diablo.perm.test <- function(X, Y, ncomp, keepX, design, ..., n_per = 1000, seed = 1, target.fdr = 0.05) {
+#library(mixOmics)
+#library(foreach)
+#library(doRNG)
+#library(doParallel)
+
+diablo.perm.test <- function(X, Y, ncomp = 2, keepX = lapply(X, function(x) rep(ncol(x), ncomp)), design = "null", ..., n_perm = 1000, perm_on = "both", seed = 1, target.q = 0.05, p.adj.method = "fdr") {
 
   # Fit the original DIABLO model
   diablo.orig <- block.splsda(X, Y, ncomp = ncomp, keepX = keepX, design = design, ...)
   
   # Run permutation tests in parallel
-  perm.diablo.loadings <- foreach::foreach(i = 1:n_per, .packages = c("mixOmics"), .options.RNG = seed) %dorng% {
-    perm.y <- sample(Y)
-    diablo.loadings <- block.splsda(X, perm.y, ncomp = ncomp, keepX = keepX, design = design)$loadings
+  perm.diablo.loadings <- foreach::foreach(i = 1:n_perm, .packages = c("mixOmics"), .options.RNG = seed) %dorng% {
+    if (perm_on == "Y"){
+      perm.y <- sample(Y)
+      perm.X <- X
+    } else if (perm_on == "X"){
+      perm.X <- lapply(X, function(x){
+        x.perm <- x[sample(nrow(x)), ]
+        rownames(x.perm) <- rownames(x)
+        return(x.perm)
+      })
+      perm.y <- Y
+    }
+    else if (perm_on == "both"){
+      perm.X <- lapply(X, function(x){
+        x.perm <- x[sample(nrow(x)), ]
+        rownames(x.perm) <- rownames(x)
+        return(x.perm)
+      })
+      perm.y <- sample(Y)
+    }
+    diablo.loadings <- block.splsda(perm.X, perm.y, ncomp = ncomp, keepX = keepX, design = design)$loadings
     return(diablo.loadings)
   }
   
@@ -23,10 +47,10 @@ diablo.perm.test <- function(X, Y, ncomp, keepX, design, ..., n_per = 1000, seed
   
   perm.loadings <- vector("list", n_omics)
   for (i in 1:n_omics) {
-    perm.loadings[[i]] <- array(NA, dim = c(n_per, ncol(X[[i]]), ncomp),
+    perm.loadings[[i]] <- array(NA, dim = c(n_perm, ncol(X[[i]]), ncomp),
                                 dimnames = list(NULL, colnames(X[[i]]), paste0("comp", 1:ncomp)))
     
-    for (j in 1:n_per) {
+    for (j in 1:n_perm) {
       perm.loadings[[i]][j, , ] <- perm.diablo.loadings[[j]][[i]][, 1:ncomp]
     }
   }
@@ -42,11 +66,13 @@ diablo.perm.test <- function(X, Y, ncomp, keepX, design, ..., n_per = 1000, seed
                         dimnames = list(colnames(X[[i]]), paste0("comp", 1:ncomp)))
     for (k in 1:ncomp) {
       for (j in 1:ncol(X[[i]])) {
-        pvalues[[i]][j, k] <- sum(abs(perm.loadings[[i]][, j, k]) >= abs(diablo.orig$loadings[[i]][j, k])) / n_per
-        adj.p[[i]][j, k] <- 0
+        pvalues[[i]][j, k] <- sum(abs(perm.loadings[[i]][, j, k]) >= abs(diablo.orig$loadings[[i]][j, k])) / n_perm
+        adj.p[[i]][j, k] <- 1
       }
-      # adjust p-values for multiple testing -- ncol(X[[i]]) tests for each component
-      adj.p[[i]][, k] <- p.adjust(pvalues[[i]][, k], method = "fdr")
+      # adjust p-values for multiple testing -- 'the number of selected variables' tests for each component
+      selected.index <- which(abs(diablo.orig$loadings[[i]][, k]) > 0)
+      n_selected <- length(selected.index)
+      adj.p[[i]][selected.index, k] <- p.adjust(pvalues[[i]][selected.index, k], method = p.adj.method, n = n_selected)
     }
     
   }
@@ -59,7 +85,7 @@ diablo.perm.test <- function(X, Y, ncomp, keepX, design, ..., n_per = 1000, seed
     
     for (j in 1:ncol(X[[i]])) {
       for (k in 1:ncomp) {
-        if (pvalues[[i]][j, k] <= target.fdr) {
+        if (pvalues[[i]][j, k] <= target.q) {
           selected.vars[[i]][j, k] <- TRUE
         }
       }
